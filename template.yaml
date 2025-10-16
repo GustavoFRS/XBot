@@ -1,0 +1,65 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  XBot Legislative Data Pipeline - Step Function + Lambdas (Download e Clean CSV)
+
+Globals:
+  Function:
+    Timeout: 180
+    MemorySize: 512
+    Runtime: python3.10
+    Architectures: [x86_64]
+    Environment:
+      Variables:
+        S3_BUCKET_NAME: !Ref BotDaCamaraBucket
+    Policies:
+      - S3ReadPolicy:
+          BucketName: !Ref BotDaCamaraBucket
+      - S3WritePolicy:
+          BucketName: !Ref BotDaCamaraBucket
+
+Resources:
+  ### 🚀 S3 Bucket principal ###
+  BotDaCamaraBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: xbot-legislative-data
+
+  ### 🧩 Lambda 1 - Download do CSV ###
+  DownloadCSVFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: lambdas.fetch_projects_csv.lambda_handler
+      Description: Baixa o CSV do site e salva no bucket S3 (pasta raw/)
+
+  ### 🧹 Lambda 2 - Limpeza do CSV ###
+  CleanCSVFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: lambdas.clean_csv.lambda_handler
+      Description: Lê o CSV do S3, limpa e salva na pasta clean/, retornando linhas limpas
+
+  ### 🔁 Step Function (início do pipeline) ###
+  LegislativeDataStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Name: LegislativeDataPipeline
+      DefinitionSubstitutions:
+        DownloadCSVArn: !GetAtt DownloadCSVFunction.Arn
+        CleanCSVArn: !GetAtt CleanCSVFunction.Arn
+      Definition:
+        Comment: "Pipeline inicial - Baixar e limpar CSV"
+        StartAt: DownloadCSV
+        States:
+          DownloadCSV:
+            Type: Task
+            Resource: ${DownloadCSVArn}
+            ResultPath: "$.download"
+            Next: CleanCSV
+          CleanCSV:
+            Type: Task
+            Resource: ${CleanCSVArn}
+            ResultPath: "$.clean"
+            End: true
