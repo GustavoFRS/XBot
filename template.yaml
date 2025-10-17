@@ -1,47 +1,114 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  XBot Legislative Data Pipeline - Step Function + Lambdas (Download e Clean CSV)
+  XBot Legislative Data Pipeline - Step Function com Download, Clean e FetchIndividualProject
+
+# Parâmetros que serão solicitados no deploy
+Parameters:
+  OpenAIKeyValue:
+    Type: String
+    NoEcho: true # Esconde o valor digitado em logs e console
+    Description: "Cole aqui a sua chave secreta da OpenAI (sk-...)."
+    MinLength: 1
 
 Globals:
   Function:
-    Timeout: 180
+    Timeout: 300
     MemorySize: 512
     Runtime: python3.10
     Architectures: [x86_64]
     Environment:
       Variables:
-        S3_BUCKET_NAME: !Ref BotDaCamaraBucket
-    Policies:
-      - S3ReadPolicy:
-          BucketName: !Ref BotDaCamaraBucket
-      - S3WritePolicy:
-          BucketName: !Ref BotDaCamaraBucket
+        S3_BUCKET_NAME: !Ref DataBucket
 
 Resources:
-  ### 🚀 S3 Bucket principal ###
-  BotDaCamaraBucket:
+  ### APIKEY da OpenAI ###
+  OpenAISecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: XBot/OpenAIKey
+      Description: "Chave da API da OpenAI para o projeto XBot"
+      # Usa o valor do parâmetro para preencher o segredo
+      SecretString: !Sub '{"OPENAI_API_KEY":"${OpenAIKeyValue}"}'
+
+
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: LambdaS3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: !Sub "${DataBucket.Arn}/*"
+
+
+  ### Bucket de dados ###
+  DataBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: xbot-legislative-data
 
-  ### 🧩 Lambda 1 - Download do CSV ###
+  ### Download CSV ###
   DownloadCSVFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: lambdas.fetch_projects_csv.lambda_handler
-      Description: Baixa o CSV do site e salva no bucket S3 (pasta raw/)
+      Description: Baixa o CSV da Câmara e salva no bucket S3 (pasta raw/)
+      Role: !GetAtt LambdaExecutionRole.Arn
 
-  ### 🧹 Lambda 2 - Limpeza do CSV ###
+  ### Clean CSV ###
   CleanCSVFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
       Handler: lambdas.clean_csv.lambda_handler
-      Description: Lê o CSV do S3, limpa e salva na pasta clean/, retornando linhas limpas
+      Description: Lê o CSV do S3, limpa e salva na pasta clean/, retornando proposições filtradas
+      Role: !GetAtt LambdaExecutionRole.Arn
 
-  ### 🔁 Step Function (início do pipeline) ###
+  ### Fetch Individual Project ###
+  FetchIndividualProjectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: lambdas.fetch_individual_project.lambda_handler
+      Description: Itera pelas proposições, baixa o PDF do inteiro teor e salva texto no S3
+      Timeout: 600  # alguns PDFs podem demorar
+      MemorySize: 1024
+      Role: !GetAtt LambdaExecutionRole.Arn
+
+  ### Generate Tweets ###
+  GenerateTweetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: lambdas.generate_tweets.lambda_handler
+      Description: Gera o texto de um tweet para uma proposição usando IA.
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60 # Chamadas de API podem demorar
+      MemorySize: 512
+      Environment:
+        Variables:
+          OPENAI_API_KEY: !Ref OpenAISecret
+      Policies:
+        - SecretsManagerReadPolicy:
+            SecretName: !Ref OpenAISecret
+
+  ### Step Function ###
   LegislativeDataStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
@@ -49,8 +116,10 @@ Resources:
       DefinitionSubstitutions:
         DownloadCSVArn: !GetAtt DownloadCSVFunction.Arn
         CleanCSVArn: !GetAtt CleanCSVFunction.Arn
+        FetchIndividualProjectArn: !GetAtt FetchIndividualProjectFunction.Arn
+        GenerateTweetArn: !GetAtt GenerateTweetFunction.Arn
       Definition:
-        Comment: "Pipeline inicial - Baixar e limpar CSV"
+        Comment: "Pipeline inicial: Download → Clean → Fetch Individual"
         StartAt: DownloadCSV
         States:
           DownloadCSV:
@@ -62,4 +131,31 @@ Resources:
             Type: Task
             Resource: ${CleanCSVArn}
             ResultPath: "$.clean"
-            End: true
+            Next: FetchIndividualProject
+          FetchIndividualProject:
+            Type: Task
+            Resource: ${FetchIndividualProjectArn}
+            ResultPath: "$.fetch"
+            Next: GenerateTweetsMap
+          GenerateTweetsMap: # <-- Novo estado Map
+            Type: Map
+            ItemsPath: "$.fetch.propositions" 
+            MaxConcurrency: 5 
+            ResultPath: "$.tweets"
+            Iterator:
+              StartAt: GenerateSingleTweet
+              States:
+                GenerateSingleTweet:
+                  Type: Task
+                  Resource: ${GenerateTweetArn}
+                  End: true
+            End: true # <-- Fim da State Machine
+      Policies:
+          - LambdaInvokePolicy:
+              FunctionName: !Ref DownloadCSVFunction
+          - LambdaInvokePolicy:
+              FunctionName: !Ref CleanCSVFunction
+          - LambdaInvokePolicy:
+              FunctionName: !Ref FetchIndividualProjectFunction
+          - LambdaInvokePolicy:
+              FunctionName: !Ref GenerateTweetFunction
