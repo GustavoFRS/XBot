@@ -1,7 +1,9 @@
 import pandas as pd
+import numpy as np
 from datetime import datetime
+from slugify import slugify
 
-def clean_csv(caminho_arquivo="src/data/proposicoes.csv"):
+def clean_csv(caminho_arquivo: str):
     """
     Limpa o CSV da Câmara e retorna as proposições apresentadas hoje.
     """
@@ -17,15 +19,19 @@ def clean_csv(caminho_arquivo="src/data/proposicoes.csv"):
 
         # TODO:
         # 📊 Remove colunas desnecessárias
-        # slugify df["Proposições"] (mudar nome da coluna -> id)
         
         # 🔎 Filtra proposições apresentadas hoje
         df_hoje = df[df["Apresentação"] == hoje]
-        df_hoje.to_csv("src/data/proposicoes_hoje.csv", index=False)
+
+        # Slugify
+        df_hoje['Proposições_slugified'] = df_hoje['Proposições'].apply(slugify)
+
+        # Remove NaN
+        df_hoje = df_hoje.replace({np.nan: None})
 
         print(f"📊 {len(df_hoje)} proposições encontradas com data {hoje}.")
         return df_hoje
 
     except Exception as e:
         print(f"❌ Erro ao limpar CSV: {e}")
-        return pd.DataFrame()
+        raise e
