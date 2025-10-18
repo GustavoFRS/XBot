@@ -43,4 +43,4 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print(f"❌ Erro no handler clean_csv: {e}")
-        raise
+        raise e
