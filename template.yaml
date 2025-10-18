@@ -54,6 +54,14 @@ Resources:
                   - s3:GetObject
                   - s3:PutObject
                 Resource: !Sub "${DataBucket.Arn}/*"
+        - PolicyName: LambdaSecretsManagerAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource: !Ref OpenAISecret
 
 
   ### Bucket de dados ###
@@ -96,7 +104,7 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
-      Handler: lambdas.generate_tweets.lambda_handler
+      Handler: lambdas.generate_tweet.lambda_handler
       Description: Gera o texto de um tweet para uma proposição usando IA.
       Role: !GetAtt LambdaExecutionRole.Arn
       Timeout: 60 # Chamadas de API podem demorar
@@ -104,9 +112,6 @@ Resources:
       Environment:
         Variables:
           OPENAI_API_KEY: !Ref OpenAISecret
-      Policies:
-        - SecretsManagerReadPolicy:
-            SecretName: !Ref OpenAISecret
 
   ### Step Function ###
   LegislativeDataStateMachine:
@@ -125,21 +130,20 @@ Resources:
           DownloadCSV:
             Type: Task
             Resource: ${DownloadCSVArn}
-            ResultPath: "$.download"
             Next: CleanCSV
           CleanCSV:
             Type: Task
             Resource: ${CleanCSVArn}
-            ResultPath: "$.clean"
+            ResultPath: "$.cleanCsv"
             Next: FetchIndividualProject
           FetchIndividualProject:
             Type: Task
             Resource: ${FetchIndividualProjectArn}
-            ResultPath: "$.fetch"
+            ResultPath: "$.dailyProjects"
             Next: GenerateTweetsMap
           GenerateTweetsMap: # <-- Novo estado Map
             Type: Map
-            ItemsPath: "$.fetch.propositions" 
+            ItemsPath: "$.dailyProjects.propositions" 
             MaxConcurrency: 5 
             ResultPath: "$.tweets"
             Iterator:
