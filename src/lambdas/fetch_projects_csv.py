@@ -17,7 +17,7 @@ def lambda_handler(event, context):
         fetch_projects_csv(caminho_arquivo=caminho_local)
 
         # 🔼 Envia para o S3
-        s3_key = f"data/raw/proposicoes_{pagina}.csv"
+        s3_key = f"data/raw/proposicoes.csv"
         s3.upload_file(caminho_local, BUCKET, s3_key)
 
         print(f"✅ CSV salvo em s3://{BUCKET}/{s3_key}")
@@ -30,4 +30,4 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print(f"❌ Erro no handler download_csv: {e}")
-        raise
+        raise e
