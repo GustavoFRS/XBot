@@ -1,12 +1,6 @@
-import os
 import openai
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
 from typing import List
-
-load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
 
 class SummaryResponse(BaseModel):
     pontos_chave: List[str] = Field(
@@ -22,28 +16,8 @@ class SummaryResponse(BaseModel):
         description="Resumo curto da justificativa do projeto (até 180 caracteres)."
     )
 
-def forbid_additional_properties(schema: dict) -> dict:
-    """
-    Varre o JSON Schema e força additionalProperties: false em todos os objetos.
-    """
-    if not isinstance(schema, dict):
-        return schema
-
-    # Se é um objeto, garanta o additionalProperties
-    if schema.get("type") == "object":
-        schema.setdefault("additionalProperties", False)
-
-    # Varre recursivamente propriedades aninhadas
-    for _, value in list(schema.items()):
-        if isinstance(value, dict):
-            forbid_additional_properties(value)
-        elif isinstance(value, list):
-            for item in value:
-                forbid_additional_properties(item)
-
-    return schema
-
 def generate_tweet(
+    api_key: str,
     text: str,
     numero_pec: str,
     autor: str,
@@ -56,6 +30,8 @@ def generate_tweet(
     Gera o conteúdo completo de um tweet, a partir do texto da proposição.
     Apenas os pontos-chave e a justificativa são gerados por IA.
     """
+    # Define chave
+    openai.api_key = api_key
 
     system_prompt = """
     Você é um assistente especializado em resumir Projetos de Lei e PECs da Câmara dos Deputados do Brasil.
@@ -82,9 +58,6 @@ def generate_tweet(
 
     Gere a saída seguindo estritamente as instruções acima.
     """
-
-
-    schema = forbid_additional_properties(SummaryResponse.model_json_schema())
 
     response = openai.chat.completions.create(
         model="gpt-4o-mini",
