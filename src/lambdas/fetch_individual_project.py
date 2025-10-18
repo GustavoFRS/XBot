@@ -18,8 +18,12 @@ def lambda_handler(event, context):
         }
     """
     try:
-        bucket = event.get("bucket", BUCKET)
-        propositions = event.get("propositions", [])
+        # Acessa o dicionário 'cleanCsv' primeiro
+        clean_csv_output = event.get("cleanCsv", {})
+        
+        # Agora, extrai as variáveis de dentro desse dicionário
+        bucket = clean_csv_output.get("bucket", BUCKET)
+        propositions = clean_csv_output.get("propositions", [])
 
         if not propositions:
             print("⚠️ Nenhuma proposição recebida para processar.")
@@ -68,6 +72,7 @@ def lambda_handler(event, context):
                 prop["inteiro_teor_key"] = None
 
         # ✅ Retorna a mesma lista, mas enriquecida
+        # TODO: CORRIGIR SAIDA
         return {
             "bucket": bucket,
             "propositions": propositions
