@@ -31,10 +31,10 @@ def list_pending_tweets_for_date(bucket_name: str, start_utc: datetime, end_utc:
 
     for page in pages:
         for obj in page.get('Contents', []):
-            if obj['Key'].endswith('tweet.txt') and start_utc <= obj['LastModified'] < end_utc:
+            if obj['Key'].endswith('post_data.json') and start_utc <= obj['LastModified'] < end_utc:
                 pending_tweets.append(obj['Key'])
                 
-    logger.info(f"Encontrados {len(pending_tweets)} tweets para agendar.")
+    logger.info(f"Encontrados {len(pending_tweets)} posts para agendar.")
     return pending_tweets
 
 
@@ -60,7 +60,7 @@ def create_schedules(
 
     for key in tweet_keys:
         sanitized_key = slugify(key) # Supondo que você tenha a função slugify
-        schedule_name = f"tweet-{sanitized_key}"
+        schedule_name = f"post-{sanitized_key}"
 
         # 1. Garante que o horário atual do loop esteja em UTC
         utc_schedule_time = current_schedule_time.astimezone(timezone.utc)
