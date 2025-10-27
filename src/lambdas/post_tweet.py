@@ -1,10 +1,12 @@
-# src/lambdas/poster_lambda.py
-
 import os
 import boto3
 import json
 import logging
-from services.post_tweet_service import post_tweet
+import tweepy
+from services.post_tweet_service import create_bluesky_post
+from datetime import datetime, timezone
+
+print(datetime.now(timezone.utc))
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
@@ -26,6 +28,7 @@ def get_x_credentials() -> dict:
         logger.error(f"Erro ao obter credenciais do X do Secrets Manager: {e}")
         raise
 
+
 def lambda_handler(event, context):
     try:
         # 1. Obter as dependências (credenciais e conteúdo)
@@ -36,12 +39,12 @@ def lambda_handler(event, context):
             raise ValueError("O evento não contém a chave 's3_key'.")
             
         s3_object = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
-        tweet_content = s3_object['Body'].read().decode('utf-8')
+        post_data_json = json.loads(s3_object['Body'].read().decode('utf-8'))
         
         # 2. Injetar as dependências no serviço
-        result = post_tweet(
+        result = create_bluesky_post(
             credentials=credentials, 
-            content=tweet_content
+            content=post_data_json
         )
         
         logger.info(f"Postagem finalizada com resultado: {result}")
