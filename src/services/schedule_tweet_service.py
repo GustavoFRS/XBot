@@ -1,5 +1,3 @@
-# src/services/scheduler_service.py
-
 import boto3
 import json
 import logging
