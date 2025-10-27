@@ -1,6 +1,19 @@
 import openai
 from pydantic import BaseModel, Field, ValidationError
 from typing import List
+from pydantic import field_validator
+
+class ProjetoLeiJSON(BaseModel):
+    numero: str
+    autor: str
+    partido: str
+    uf: str
+    ementa_original: str
+    ementa_resumida: str
+    pontos_chave: List[str]
+    justificativa: str
+    link: str
+
 
 class SummaryResponse(BaseModel):
     pontos_chave: List[str] = Field(
@@ -16,7 +29,39 @@ class SummaryResponse(BaseModel):
         description="Resumo curto da justificativa do projeto (até 180 caracteres)."
     )
 
-def generate_tweet(
+    @field_validator('pontos_chave', mode="after")
+    @classmethod
+    def validar_total_chars(cls, v):
+        """
+        Valida se a soma total de caracteres dos pontos-chave não excede 285.
+        """
+        total_chars = sum(len(item) for item in v)
+        if total_chars > 285:
+            raise ValueError(f"Total de caracteres excedido: {total_chars} > 285")
+
+        return v
+
+def resumir_ementa(api_key: str, ementa: str, max_chars: int = 300) -> str:
+    """Se a ementa for longa, resume-a para até 300 caracteres usando IA."""
+    if len(ementa) <= max_chars:
+        return ementa
+
+    openai.api_key = api_key
+    prompt = f"""
+    Resuma o texto abaixo para no máximo {max_chars} caracteres, mantendo o sentido e a clareza.
+    Texto: {ementa}
+    """
+    response = openai.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": prompt}],
+        temperature=0.4,
+    )
+
+    resumo = response.choices[0].message.content.strip()
+    return resumo
+
+
+def gerar_resumo(
     api_key: str,
     text: str,
     numero_pec: str,
@@ -33,6 +78,8 @@ def generate_tweet(
     # Define chave
     openai.api_key = api_key
 
+    ementa_resumida = resumir_ementa(api_key, ementa, max_chars=300)
+
     system_prompt = """
     Você é um assistente especializado em resumir Projetos de Lei e PECs da Câmara dos Deputados do Brasil.
 
@@ -45,7 +92,7 @@ def generate_tweet(
         "pontos_chave": ["string", "string"],
         "justificativa": "string"
     }
-    3. `pontos_chave` deve ser uma lista de 1 a 4 frases curtas (máximo 100 caracteres cada).
+    3. `pontos_chave` deve ser uma lista de 1 a 4 frases curtas (somadas devem ter um máximo de 285 caracteres).
     4. `justificativa` deve ser uma frase única (máximo 180 caracteres) explicando a motivação do projeto.
     5. Não use comentários, explicações ou texto fora do JSON.
     6. Responda em português, de forma clara e objetiva.
@@ -94,27 +141,18 @@ def generate_tweet(
         )
         data = SummaryResponse.model_validate_json(fix_response.choices[0].message.content)
 
-    pontos = "\n".join([f"    - {p}" for p in data.pontos_chave])
-    tweet = (
-        f"PL/PEC {numero_pec}\n"
-        f"Autor: {autor} ({partido}-{uf})\n\n"
-        f"{ementa}\n"
-        f"Pontos-chave:\n{pontos}\n"
-        f"Justificativa: {data.justificativa}\n"
-        f"Link: {link}"
+    
+    # Monta o JSON final
+    projeto_json = ProjetoLeiJSON(
+        numero=numero_pec,
+        autor=autor,
+        partido=partido,
+        uf=uf,
+        ementa_original=ementa,
+        ementa_resumida=ementa_resumida,
+        pontos_chave=data.pontos_chave,
+        justificativa=data.justificativa,
+        link=link
     )
 
-    return tweet
-
-if __name__ == "__main__":
-    with open("src/data/proposicao_20251014_112450.txt", "r", encoding="utf-8") as f:
-        text = f.read()
-    print(generate_tweet(
-        text=text,
-        numero_pec="PL 5095/2025",
-        autor="Kim Kataguiri",
-        partido="União",
-        uf="SP",
-        ementa="Confere imunidade Penal e Civil para qualquer pessoa que faça crítica, mesmo que ofensiva, a membro dos poderes Executivo, Legislativo e Judiciário.",
-        link="http://www.camara.leg.br/proposicoesWeb/fichadetramitacao?idProposicao=2570616"
-    ))
+    return projeto_json.model_dump()
