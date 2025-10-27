@@ -10,6 +10,23 @@ Parameters:
     NoEcho: true # Esconde o valor digitado em logs e console
     Description: "Cole aqui a sua chave secreta da OpenAI (sk-...)."
     MinLength: 1
+  # Valores para as credenciais da API do X
+  XApiKey:
+    Type: String
+    NoEcho: true
+    Description: "Cole aqui a sua X API Key."
+  XApiSecret:
+    Type: String
+    NoEcho: true
+    Description: "Cole aqui a sua X API Secret."
+  XAccessToken:
+    Type: String
+    NoEcho: true
+    Description: "Cole aqui o seu X Access Token."
+  XAccessTokenSecret:
+    Type: String
+    NoEcho: true
+    Description: "Cole aqui o seu X Access Token Secret."
 
 Globals:
   Function:
@@ -28,8 +45,20 @@ Resources:
     Properties:
       Name: XBot/OpenAIKey
       Description: "Chave da API da OpenAI para o projeto XBot"
-      # Usa o valor do parâmetro para preencher o segredo
       SecretString: !Sub '{"OPENAI_API_KEY":"${OpenAIKeyValue}"}'
+  ### Keys do X ###
+  XApiSecrets: 
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: XBot/XKeys
+      Description: "Credenciais da API do X (v2) para o projeto XBot"
+      SecretString: !Sub |
+        {
+          "X_API_KEY": "${XApiKey}",
+          "X_API_SECRET": "${XApiSecret}",
+          "X_ACCESS_TOKEN": "${XAccessToken}",
+          "X_ACCESS_SECRET": "${XAccessTokenSecret}"
+        }
 
 
   LambdaExecutionRole:
@@ -59,9 +88,11 @@ Resources:
             Version: '2012-10-17'
             Statement:
               - Effect: Allow
-                Action:
-                  - secretsmanager:GetSecretValue
+                Action: "secretsmanager:GetSecretValue"
                 Resource: !Ref OpenAISecret
+              - Effect: Allow
+                Action: "secretsmanager:GetSecretValue"
+                Resource: !Ref XApiSecrets 
 
 
   ### Bucket de dados ###
@@ -113,6 +144,142 @@ Resources:
         Variables:
           OPENAI_API_KEY: !Ref OpenAISecret
 
+  ### Tweet Poster ###
+  PosterLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: lambdas.post_tweet.lambda_handler
+      Description: Publica tweets no X
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 512
+      Environment:
+        Variables:
+          X_SECRET_NAME: "XBot/XKeys"
+  
+  SchedulerLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: lambdas.schedule_tweet.lambda_handler
+      Description: Encontra tweets no S3 e cria agendamentos no EventBridge para postá-los.
+      Timeout: 120 
+      MemorySize: 256
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref DataBucket
+          POSTER_LAMBDA_ARN: !GetAtt PosterLambdaFunction.Arn
+          SCHEDULER_ROLE_ARN: !GetAtt EventBridgeSchedulerRole.Arn
+      Policies:
+        # Política 0
+        - S3ReadPolicy: 
+            BucketName: !Ref DataBucket
+
+        # Política 1
+        - Statement:
+            - Effect: Allow
+              Action:
+                - scheduler:CreateSchedule
+                - scheduler:UpdateSchedule
+                - scheduler:DeleteSchedule
+              Resource: "*"
+
+        # Política 2 (corrigida)
+        - Statement:
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !GetAtt EventBridgeSchedulerRole.Arn
+
+
+  # Role que o EventBridge Scheduler assume para invocar a PosterLambda
+  EventBridgeSchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokePosterLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: "lambda:InvokeFunction"
+                Resource: !GetAtt PosterLambdaFunction.Arn
+
+  EventBridgeSchedulerInvokeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokeSchedulerLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: "lambda:InvokeFunction"
+                Resource: !GetAtt SchedulerLambdaFunction.Arn
+
+  # Regra CRON que invoca a SchedulerLambda todo dia às 8h da manhã (horário de Brasília)
+  DailySchedulerTrigger:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: Daily-Tweet-Scheduling-Trigger
+      Description: "Invoca a SchedulerLambda todo dia para agendar os tweets."
+      ScheduleExpression: "cron(30 10 * * ? *)"
+      ScheduleExpressionTimezone: "America/Sao_Paulo"
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      Target:
+        Arn: !GetAtt SchedulerLambdaFunction.Arn
+        RoleArn: !GetAtt EventBridgeSchedulerInvokeRole.Arn # O Scheduler também precisa de uma role para invocar a SchedulerLambda
+
+  # Role que o EventBridge Scheduler assume para INICIAR a Step Function
+  EventBridgeSchedulerSfnRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: scheduler.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StartStepFunctionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action: "states:StartExecution"
+                Resource: !GetAtt LegislativeDataStateMachine.Arn
+
+  # Regra CRON que invoca a Step Function
+  DailyStepFunctionTrigger:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: Daily-Data-Pipeline-Trigger
+      Description: "Invoca a Step Function de geração de dados e tweets diariamente."
+      ScheduleExpression: "cron(0 8 ? * TUE-SAT *)" # Executa terça-sábado
+      ScheduleExpressionTimezone: "America/Sao_Paulo"
+      FlexibleTimeWindow:
+        Mode: "OFF"
+      State: ENABLED # Boa prática para garantir que a regra seja criada ativa
+      Target:
+        Arn: !GetAtt LegislativeDataStateMachine.Arn
+        RoleArn: !GetAtt EventBridgeSchedulerSfnRole.Arn
+
   ### Step Function ###
   LegislativeDataStateMachine:
     Type: AWS::Serverless::StateMachine
@@ -141,7 +308,7 @@ Resources:
             Resource: ${FetchIndividualProjectArn}
             ResultPath: "$.dailyProjects"
             Next: GenerateTweetsMap
-          GenerateTweetsMap: # <-- Novo estado Map
+          GenerateTweetsMap: 
             Type: Map
             ItemsPath: "$.dailyProjects.propositions" 
             MaxConcurrency: 5 
@@ -153,7 +320,7 @@ Resources:
                   Type: Task
                   Resource: ${GenerateTweetArn}
                   End: true
-            End: true # <-- Fim da State Machine
+            End: true
       Policies:
           - LambdaInvokePolicy:
               FunctionName: !Ref DownloadCSVFunction
