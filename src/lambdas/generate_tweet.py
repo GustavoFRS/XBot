@@ -1,7 +1,7 @@
 import os
 import boto3
 import json
-from services.generate_tweet_service import generate_tweet
+from services.generate_tweet_service import gerar_resumo
 
 # CLients
 s3_client = boto3.client("s3")
@@ -38,7 +38,7 @@ def lambda_handler(event, context):
         full_text = s3_object['Body'].read().decode('utf-8')
 
         # 2. Chama a função para gerar o tweet
-        tweet_content = generate_tweet(
+        post_data_json = gerar_resumo(
             api_key=get_openai_key(),
             text=full_text,
             numero_pec=event['Proposições'],
@@ -49,24 +49,25 @@ def lambda_handler(event, context):
             link=event['Link']
         )
         
-        print(f"Tweet gerado com sucesso para {event['Proposições']}")
+        print(f"JSON gerado com sucesso para {event['Proposições']}")
         # 3 Salvar tweet em s3
-        tweet_key = proposition_key.replace("/inteiro_teor.txt", "/tweet.txt")
+        post_data_key = proposition_key.replace("/inteiro_teor.txt", "/post_data.json")
 
         s3_client.put_object(
             Bucket=S3_BUCKET_NAME, 
-            Key=tweet_key, 
-            Body=tweet_content.encode('utf-8'),
+            Key=post_data_key, 
+            Body=json.dumps(post_data_json, ensure_ascii=False, indent=2).encode('utf-8'),
+            contentType="application/json"
         )
 
-        print(f"Tweet salvo em s3://{S3_BUCKET_NAME}/{tweet_key}")
+        print(f"JSON salvo em s3://{S3_BUCKET_NAME}/{post_data_key}")
 
 
         # 4. Retorna o resultado
         return {
             "statusCode": 200,
             "proposition": event['Proposições'],
-            "tweet_key": tweet_key
+            "tweet_key": post_data_key
         }
 
     except Exception as e:
