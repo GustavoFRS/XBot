@@ -1,4 +1,4 @@
-import openai
+from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
 from typing import List
 from pydantic import field_validator
@@ -7,20 +7,22 @@ class ProjetoLeiJSON(BaseModel):
     numero: str
     autor: str
     partido: str
-    uf: str
+    uf: str = Field(..., min_length=2, max_length=4)
     ementa_original: str
-    ementa_resumida: str
+    ementa_resumida: str = Field(..., min_length=1, max_length=300)
     pontos_chave: List[str]
     justificativa: str
     link: str
 
+class PontoChave(BaseModel):
+    ponto: str = Field(..., min_length=1, max_length=95)
 
 class SummaryResponse(BaseModel):
-    pontos_chave: List[str] = Field(
+    pontos_chave: List[PontoChave] = Field(
         ...,
         min_length=1,
-        max_length=4,
-        description="Lista de 1 a 4 pontos principais extraídos do texto."
+        max_length=3,
+        description="Lista de 1 a 3 pontos principais extraídos do texto."
     )
     justificativa: str = Field(
         ...,
@@ -29,36 +31,34 @@ class SummaryResponse(BaseModel):
         description="Resumo curto da justificativa do projeto (até 180 caracteres)."
     )
 
-    @field_validator('pontos_chave', mode="after")
-    @classmethod
-    def validar_total_chars(cls, v):
-        """
-        Valida se a soma total de caracteres dos pontos-chave não excede 285.
-        """
-        total_chars = sum(len(item) for item in v)
-        if total_chars > 285:
-            raise ValueError(f"Total de caracteres excedido: {total_chars} > 285")
-
-        return v
 
 def resumir_ementa(api_key: str, ementa: str, max_chars: int = 300) -> str:
-    """Se a ementa for longa, resume-a para até 300 caracteres usando IA."""
+    """Se a ementa for longa, resume-a para até 300 caracteres usando IA."""    
     if len(ementa) <= max_chars:
         return ementa
 
-    openai.api_key = api_key
-    prompt = f"""
-    Resuma o texto abaixo para no máximo {max_chars} caracteres, mantendo o sentido e a clareza.
-    Texto: {ementa}
-    """
-    response = openai.chat.completions.create(
+    class ResumoEmenta(BaseModel):
+        resumo: str = Field(..., min_length=1, max_length=max_chars)
+    
+    client = OpenAI(api_key=api_key)
+
+    response = client.responses.parse(
         model="gpt-4o-mini",
-        messages=[{"role": "user", "content": prompt}],
+        input=[
+            {
+                "role": "system", 
+                "content": f"Resuma o texto abaixo para no máximo {max_chars} caracteres, mantendo o sentido e a clareza."
+            },
+            {
+                "role": "user", 
+                "content": ementa
+            }
+        ],
+        text_format=ResumoEmenta,
         temperature=0.4,
     )
 
-    resumo = response.choices[0].message.content.strip()
-    return resumo
+    return response.output_parsed.resumo
 
 
 def gerar_resumo(
@@ -76,7 +76,7 @@ def gerar_resumo(
     Apenas os pontos-chave e a justificativa são gerados por IA.
     """
     # Define chave
-    openai.api_key = api_key
+    client = OpenAI(api_key=api_key)
 
     ementa_resumida = resumir_ementa(api_key, ementa, max_chars=300)
 
@@ -106,42 +106,18 @@ def gerar_resumo(
     Gere a saída seguindo estritamente as instruções acima.
     """
 
-    response = openai.chat.completions.create(
+    response = client.responses.parse(
         model="gpt-4o-mini",
-        messages=[
+        input=[
             {"role": "user", "content": user_prompt}, 
             {"role": "system", "content": system_prompt}
             ],
+        text_format=SummaryResponse,
         temperature=0.4,
-        response_format={
-            "type": "json_object"
-        }
     )
 
-    content = response.choices[0].message.content
+    event = response.output_parsed
 
-    try:
-        data = SummaryResponse.model_validate_json(content)
-    except ValidationError as e:
-        print("❌ Resposta inválida, ajustando com fallback:", e)
-        fix_prompt = f"""
-        Corrija o JSON abaixo para seguir estritamente o schema:
-        - 1 a 4 pontos em 'pontos_chave'
-        - 'justificativa' com até 180 caracteres
-        Retorne apenas o JSON corrigido.
-
-        JSON original:
-        {content}
-        """
-        fix_response = openai.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": fix_prompt}],
-            temperature=0,
-            response_format={"type": "json_object"}
-        )
-        data = SummaryResponse.model_validate_json(fix_response.choices[0].message.content)
-
-    
     # Monta o JSON final
     projeto_json = ProjetoLeiJSON(
         numero=numero_pec,
@@ -150,8 +126,8 @@ def gerar_resumo(
         uf=uf,
         ementa_original=ementa,
         ementa_resumida=ementa_resumida,
-        pontos_chave=data.pontos_chave,
-        justificativa=data.justificativa,
+        pontos_chave=[p.ponto for p in event.pontos_chave],
+        justificativa=event.justificativa,
         link=link
     )
 
