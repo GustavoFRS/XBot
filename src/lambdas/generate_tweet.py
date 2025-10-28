@@ -30,7 +30,13 @@ def lambda_handler(event, context):
     # Extrai informações da proposição vinda do estado Map
     proposition_key = event.get('inteiro_teor_key')
     if not proposition_key:
-        raise ValueError("Chave 'inteiro_teor_key' não encontrada no evento.")
+        msg = "Chave 'inteiro_teor_key' não encontrada no evento."
+        print(msg)
+        return {
+            "statusCode": 400,
+            "error": msg,
+            "event": event
+        }
 
     try:
         # 1. Lê o texto da proposição do S3
@@ -57,7 +63,7 @@ def lambda_handler(event, context):
             Bucket=S3_BUCKET_NAME, 
             Key=post_data_key, 
             Body=json.dumps(post_data_json, ensure_ascii=False, indent=2).encode('utf-8'),
-            contentType="application/json"
+            ContentType="application/json"
         )
 
         print(f"JSON salvo em s3://{S3_BUCKET_NAME}/{post_data_key}")
