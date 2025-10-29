@@ -6,8 +6,8 @@ from slugify import slugify
 from datetime import datetime, timedelta, timezone, date
 
 # Configuração de logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 s3_client = boto3.client("s3")
 scheduler_client = boto3.client("scheduler")
