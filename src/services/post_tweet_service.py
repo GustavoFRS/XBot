@@ -3,6 +3,9 @@ import logging
 import json
 from datetime import datetime, timezone
 
+# TODO:
+# Formatar link para bluesky
+
 def get_bluesky_session(BLUESKY_HANDLE: str, BLUESKY_APP_PASSWORD: str):
     resp = requests.post(
         "https://bsky.social/xrpc/com.atproto.server.createSession",
@@ -13,18 +16,29 @@ def get_bluesky_session(BLUESKY_HANDLE: str, BLUESKY_APP_PASSWORD: str):
     return session
 
 def format_posts(json_content: dict):
-    root_post = f"{json_content['numero']}\n {json_content['autor']} ({json_content['partido']})"
+    POST_LIMIT = 300
+
+    root_post = f"{json_content['numero']}\n{json_content['autor']} ({json_content['partido']})"
     reply_one = f"{json_content['ementa_resumida']}"
     points_text = "\n".join([f"- {p}" for p in json_content["pontos_chave"]])
     reply_two = "Resumo: \n" + points_text
-    reply_three = f"Justificativa: {json_content['justificativa']} \n {json_content['link']}"
+    reply_three = f"Justificativa: {json_content['justificativa']}\n{json_content['link']}"
 
-    return {
+    formatted_posts = {
         'root_post': root_post,
         'reply_one': reply_one,
         'reply_two': reply_two,
         'reply_three': reply_three
     }
+
+    for post_name, post_text in formatted_posts.items():
+        if len(post_text) > POST_LIMIT:
+            # Lança uma exceção se qualquer post for muito longo
+            raise ValueError(
+                f"O post '{post_name}' excedeu o limite de {POST_LIMIT} caracteres. "
+                f"Tamanho atual: {len(post_text)}"
+            )
+    return formatted_posts
 
 def reply_payload(content: str, root_uri: str, root_cid: str, parent_uri: str, parent_cid: str):
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
