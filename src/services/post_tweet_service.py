@@ -72,7 +72,6 @@ def create_bluesky_post(credentials: dict, content: dict):
     """
     try:
         #session = get_bluesky_session(credentials["BLUESKY_HANDLE"], credentials["BLUESKY_APP_PASSWORD"])
-        session = get_bluesky_session("botdacamara.bsky.social", "GYQAyHKUfG5ZpLC")
         now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         formatted_posts = format_posts(content)

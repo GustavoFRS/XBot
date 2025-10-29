@@ -27,6 +27,15 @@ Parameters:
     Type: String
     NoEcho: true
     Description: "Cole aqui o seu X Access Token Secret."
+  # Valores para as credencias do Bluesky
+  BLUESKY_APP_HANDLE:
+    Type: String
+    NoEcho: true
+    Description: "Cole aqui o seu Bluesky App Handle."
+  BLUESKY_PASSWORD:
+    Type: String
+    NoEcho: true
+    Description: "Cole aqui a sua Bluesky Password."
 
 Globals:
   Function:
@@ -58,6 +67,17 @@ Resources:
           "X_API_SECRET": "${XApiSecret}",
           "X_ACCESS_TOKEN": "${XAccessToken}",
           "X_ACCESS_SECRET": "${XAccessTokenSecret}"
+        }
+  ### Keys do Bluesky ###
+  XApiSecrets: 
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: XBot/BlueskyKeys
+      Description: "Credenciais do Bluesky para o projeto XBot"
+      SecretString: !Sub |
+        {
+          "BLUESKY_APP_HANDLE": "${BLUESKY_APP_HANDLE}",
+          "BLUESKY_PASSWORD": "${BLUESKY_PASSWORD}"
         }
 
 
@@ -138,7 +158,7 @@ Resources:
       Handler: lambdas.generate_tweet.lambda_handler
       Description: Gera o texto de um tweet para uma proposição usando IA.
       Role: !GetAtt LambdaExecutionRole.Arn
-      Timeout: 60 # Chamadas de API podem demorar
+      Timeout: 60 
       MemorySize: 512
       Environment:
         Variables:
@@ -231,19 +251,19 @@ Resources:
                 Action: "lambda:InvokeFunction"
                 Resource: !GetAtt SchedulerLambdaFunction.Arn
 
-  # Regra CRON que invoca a SchedulerLambda todo dia às 8h da manhã (horário de Brasília)
+  # Regra CRON que invoca a SchedulerLambda todo dia às 9h da manhã (horário de Brasília)
   DailySchedulerTrigger:
     Type: AWS::Scheduler::Schedule
     Properties:
       Name: Daily-Tweet-Scheduling-Trigger
       Description: "Invoca a SchedulerLambda todo dia para agendar os tweets."
-      ScheduleExpression: "cron(30 10 * * ? *)"
+      ScheduleExpression: "cron(0 9 * * ? *)"
       ScheduleExpressionTimezone: "America/Sao_Paulo"
       FlexibleTimeWindow:
         Mode: "OFF"
       Target:
         Arn: !GetAtt SchedulerLambdaFunction.Arn
-        RoleArn: !GetAtt EventBridgeSchedulerInvokeRole.Arn # O Scheduler também precisa de uma role para invocar a SchedulerLambda
+        RoleArn: !GetAtt EventBridgeSchedulerInvokeRole.Arn # role para invocar a SchedulerLambda
 
   # Role que o EventBridge Scheduler assume para INICIAR a Step Function
   EventBridgeSchedulerSfnRole:
@@ -271,11 +291,11 @@ Resources:
     Properties:
       Name: Daily-Data-Pipeline-Trigger
       Description: "Invoca a Step Function de geração de dados e tweets diariamente."
-      ScheduleExpression: "cron(0 8 ? * TUE-SAT *)" # Executa terça-sábado
+      ScheduleExpression: "cron(0 8 ? * TUE-SAT *)" # Executa terça-sábado 8h (horário de brasília)
       ScheduleExpressionTimezone: "America/Sao_Paulo"
       FlexibleTimeWindow:
         Mode: "OFF"
-      State: ENABLED # Boa prática para garantir que a regra seja criada ativa
+      State: ENABLED #garantir que a regra seja criada ativa
       Target:
         Arn: !GetAtt LegislativeDataStateMachine.Arn
         RoleArn: !GetAtt EventBridgeSchedulerSfnRole.Arn

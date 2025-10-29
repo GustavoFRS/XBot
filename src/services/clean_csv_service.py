@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timedelta
 from slugify import slugify
 
 def clean_csv(caminho_arquivo: str):
@@ -14,14 +14,15 @@ def clean_csv(caminho_arquivo: str):
         # 🧹 Remove linhas completamente vazias
         df = df.dropna(how="all")
 
-        # 🗓️ Data de hoje no formato dd/mm/yyyy
-        hoje = datetime.today().strftime("%d/%m/%Y")
+        # 🗓️ Data no formato dd/mm/yyyy
+        search_date = (datetime.today() - timedelta(days=1)).strftime("%d/%m/%Y")
 
-        # TODO:
+        # TODO: 
+        # 1. Tratar autores: podem vir mais de um separados por ';'
         # 📊 Remove colunas desnecessárias
         
         # 🔎 Filtra proposições apresentadas hoje
-        df_hoje = df[df["Apresentação"] == hoje]
+        df_hoje = df[df["Apresentação"] == search_date]
 
         # Slugify
         df_hoje['Proposições_slugified'] = df_hoje['Proposições'].apply(slugify)
@@ -29,7 +30,7 @@ def clean_csv(caminho_arquivo: str):
         # Remove NaN
         df_hoje = df_hoje.replace({np.nan: None})
 
-        print(f"📊 {len(df_hoje)} proposições encontradas com data {hoje}.")
+        print(f"📊 {len(df_hoje)} proposições encontradas com data {search_date}.")
         return df_hoje
 
     except Exception as e:

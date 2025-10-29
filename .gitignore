@@ -7,3 +7,7 @@ venv/
 .vscode/
 tweet.txt
 Makefile
+lab.ipynb
+.aws-sam
+cert/
+proposicoes_all.csv
