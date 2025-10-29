@@ -177,6 +177,7 @@ Resources:
       Environment:
         Variables:
           X_SECRET_NAME: "XBot/XKeys"
+          BLUESKY_SECRET_NAME: "XBot/BlueskyKeys"
   
   SchedulerLambdaFunction:
     Type: AWS::Serverless::Function

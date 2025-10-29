@@ -16,6 +16,7 @@ s3_client = boto3.client("s3")
 
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 X_SECRET_NAME = os.getenv("X_SECRET_NAME")
+BLUESKY_SECRET_NAME = os.getenv("BLUESKY_SECRET_NAME")
 
 def get_x_credentials() -> dict:
     """Busca as credenciais do X no Secrets Manager e retorna como um dicionário."""
@@ -28,6 +29,17 @@ def get_x_credentials() -> dict:
         logger.error(f"Erro ao obter credenciais do X do Secrets Manager: {e}")
         raise
 
+
+def get_bluesky_credentials() -> dict:
+    """Busca as credenciais do Bluesky no Secrets Manager e retorna como um dicionário."""
+    try:
+        response = secrets_manager_client.get_secret_value(SecretId=BLUESKY_SECRET_NAME)
+        secrets = json.loads(response['SecretString'])
+        logger.info("Credenciais do Bluesky obtidas do Secrets Manager com sucesso.")
+        return secrets
+    except Exception as e:
+        logger.error(f"Erro ao obter credenciais do Bluesky do Secrets Manager: {e}")
+        raise
 
 def lambda_handler(event, context):
     try:
