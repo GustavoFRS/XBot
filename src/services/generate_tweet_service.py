@@ -1,36 +1,22 @@
 from openai import OpenAI
 from pydantic import BaseModel, Field, ValidationError
-from typing import List
-from pydantic import field_validator
 
-class ProjetoLeiJSON(BaseModel):
+class ThreadFormattedResponse(BaseModel):
+    ementa_post: str = Field(min_length=50, max_length=200)
+    pontos_post: str = Field(min_length=50, max_length=240)
+    justificativa_post: str = Field(min_length=30, max_length=180)
+
+
+class ProjetoLeiPost(BaseModel):
     numero: str
     autor: str
     partido: str
-    uf: str = Field(..., min_length=2, max_length=4)
-    ementa_original: str
-    ementa_resumida: str = Field(..., min_length=1, max_length=300)
-    pontos_chave: List[str]
-    justificativa: str
+    uf: str
     link: str
 
-class PontoChave(BaseModel):
-    ponto: str = Field(..., min_length=1, max_length=95)
-
-class SummaryResponse(BaseModel):
-    pontos_chave: List[PontoChave] = Field(
-        ...,
-        min_length=1,
-        max_length=3,
-        description="Lista de 1 a 3 pontos principais extraídos do texto."
-    )
-    justificativa: str = Field(
-        ...,
-        min_length=10,
-        max_length=180,
-        description="Resumo curto da justificativa do projeto (até 180 caracteres)."
-    )
-
+    ementa_post: str
+    pontos_post: str
+    justificativa_post: str
 
 def resumir_ementa(api_key: str, ementa: str, max_chars: int = 300) -> str:
     """Se a ementa for longa, resume-a para até 300 caracteres usando IA."""    
@@ -60,7 +46,6 @@ def resumir_ementa(api_key: str, ementa: str, max_chars: int = 300) -> str:
 
     return response.output_parsed.resumo
 
-
 def gerar_resumo(
     api_key: str,
     text: str,
@@ -70,65 +55,75 @@ def gerar_resumo(
     uf: str,
     ementa: str,
     link: str
-) -> str:
-    """
-    Gera o conteúdo completo de um tweet, a partir do texto da proposição.
-    Apenas os pontos-chave e a justificativa são gerados por IA.
-    """
-    # Define chave
+) -> dict:
+
     client = OpenAI(api_key=api_key)
 
-    ementa_resumida = resumir_ementa(api_key, ementa, max_chars=300)
-
     system_prompt = """
-    Você é um assistente especializado em resumir Projetos de Lei e PECs da Câmara dos Deputados do Brasil.
+    Você é um assistente especializado em resumir Projetos de Lei da Câmara dos Deputados.
 
-    Seu objetivo é extrair informações de forma sintética, neutra e fiel ao texto fornecido.
-    Siga estas regras com rigor:
+    Seu objetivo é gerar conteúdo OTIMIZADO para threads no X (Twitter).
 
-    1. Gere a resposta ESTRITAMENTE em formato JSON válido.
-    2. O JSON deve conter exatamente:
+    Regras:
+
+    1. Responda apenas em JSON válido:
     {
-        "pontos_chave": ["string", "string"],
-        "justificativa": "string"
+      "ementa_post": "...",
+      "pontos_post": "...",
+      "justificativa_post": "..."
     }
-    3. `pontos_chave` deve ser uma lista de 1 a 4 frases curtas (somadas devem ter um máximo de 285 caracteres).
-    4. `justificativa` deve ser uma frase única (máximo 180 caracteres) explicando a motivação do projeto.
-    5. Não use comentários, explicações ou texto fora do JSON.
-    6. Responda em português, de forma clara e objetiva.
+
+    2. ementa_post:
+    - até 200 caracteres
+    - resumo claro da proposta
+
+    3. pontos_post:
+    - até 240 caracteres
+    - 1 a 3 bullets no formato:
+      "- texto"
+
+    4. justificativa_post:
+    - até 180 caracteres
+    - frase única
+
+    5. NÃO inclua títulos
+    6. NÃO ultrapasse limites
+    7. Seja direto e objetivo
     """
 
     user_prompt = f"""
-    Texto do projeto de lei a ser resumido:
+    Ementa:
+    {ementa}
 
+    Texto completo:
     {text}
-
-    Gere a saída seguindo estritamente as instruções acima.
     """
 
     response = client.responses.parse(
         model="gpt-4o-mini",
         input=[
-            {"role": "user", "content": user_prompt}, 
-            {"role": "system", "content": system_prompt}
-            ],
-        text_format=SummaryResponse,
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        text_format=ThreadFormattedResponse,
         temperature=0.4,
     )
 
-    event = response.output_parsed
+    parsed = response.output_parsed
 
-    # Monta o JSON final
-    projeto_json = ProjetoLeiJSON(
+    # fallback defensivo (ESSENCIAL)
+    def truncate(text, limit):
+        return text if len(text) <= limit else text[:limit - 3] + "..."
+
+    result = ProjetoLeiPost(
         numero=numero_pec,
         autor=autor,
         partido=partido,
         uf=uf,
-        ementa_original=ementa,
-        ementa_resumida=ementa_resumida,
-        pontos_chave=[p.ponto for p in event.pontos_chave],
-        justificativa=event.justificativa,
-        link=link
+        link=link,
+        ementa_post=truncate(parsed.ementa_post, 200),
+        pontos_post=truncate(parsed.pontos_post, 240),
+        justificativa_post=truncate(parsed.justificativa_post, 180),
     )
 
-    return projeto_json.model_dump()
+    return result.model_dump()
